@@ -10,6 +10,7 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "@aave/core-v3": "^1.19.3",
     "@layerzerolabs/lz-definitions": "^2.3.25",
     "@layerzerolabs/lz-evm-messagelib-v2": "^2.3.25",
     "@layerzerolabs/test-devtools-evm-foundry": "^0.2.7",
