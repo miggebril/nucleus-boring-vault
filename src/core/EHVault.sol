@@ -11,15 +11,26 @@ import { IPoolAddressesProvider } from "@aave/core-v3/contracts/interfaces/IPool
 import { L2Encoder } from "@aave/core-v3/contracts/misc/L2Encoder.sol";
 
 contract EHVault is BoringVault {
+
+    struct Delegation {
+        address delegatee;
+        address delegator;
+        uint256 amount;
+        uint256 startTime;
+        uint256 endTime;
+    }
+
     IPoolAddressesProvider public immutable ADDRESSES_PROVIDER;
     L2Pool public immutable lendingPool;
     L2Encoder public immutable encoder;
     IERC20 public immutable wrappedArbToken;
     ERC20Votes public immutable arbToken = ERC20Votes(0x912CE59144191C1204E64559FE8253a0e49E6548);
     
+    address public immutable treasury;
     address[] public delegates;
     mapping(address => uint256) public delegateArbBalance;
-    mapping(address => uint256) public userDelegationBalance;
+    mapping(address => Delegation[]) public delegatorsPerDelegate;
+    mapping(address => Delegation) public userDelegationBalance;
 
     event DelegationReceived(
         address indexed from,
@@ -58,7 +69,8 @@ contract EHVault is BoringVault {
         address _lendingPool,
         address _arbToken,
         address _wrappedArbToken,
-        address _addressesProvider
+        address _addressesProvider,
+        address _treasury
     )
         BoringVault(_owner, _name, _symbol, _decimals)
     {
@@ -67,6 +79,7 @@ contract EHVault is BoringVault {
         arbToken = _arbToken;
         wrappedArbToken = IERC20(_wrappedArbToken);
         encoder = L2Encoder(lendingPool);
+        treasury = _treasury;
     }
 
     function addDelegate(address delegate) external requiresAuth {
@@ -81,7 +94,25 @@ contract EHVault is BoringVault {
         delegateArbBalance[delegate] = 0;
     }
 
-    function enter(uint256 amount, address delegate) external {
+    function removeDelegate(address delegate) external requiresAuth {
+        require(delegate != address(0), "Invalid delegate address");
+        uint 256 delegateIndex = delegates.length;
+        for (uint256 i = 0; i < delegates.length; i++) {
+            address currentDelegate = delegates[i];
+            if (currentDelegate == delegate) {
+                delegateIndex = i;
+                break;
+            }
+        }
+
+        require(delegateIndex < delegates.length, "Delegate not found");
+        if (delegateArbBalance[delegate] > 0) {
+            // TODO: Handle assets for this delegate. Send back to user for now.
+
+        }
+    }
+
+    function enterStrategy(uint256 amount, address delegate) external {
         require(arbToken.balanceOf() >= amount, "Insufficient ARB balance");
         require(delegate != address(0), "Invalid delegate address");
         require(wrappedArbToken.balanceOf(address(this)) >= amount, "Insufficient wrapped ARB balance");
@@ -96,7 +127,16 @@ contract EHVault is BoringVault {
         }
 
         delegateArbBalance[delegate] += amount;
-        userDelegationBalance[msg.sender] += amount;
+        if (userDelegationBalance[msg.sender].amount == 0) {
+            userDelegationBalance[msg.sender] = Delegation({
+                delegate: delegate,
+                delegator: msg.sender,
+                amount: 0,
+                startTime: block.timestamp,
+            });
+        }
+
+        userDelegationBalance[msg.sender].amount += amount;
 
         arbToken.transferFrom(msg.sender, address(this), amount);
         wrappedArbToken.transfer(msg.sender, amount);
@@ -109,12 +149,12 @@ contract EHVault is BoringVault {
     }
 
     function exit(address delegate) external {
-        require(userDelegationBalance[msg.sender] > 0, "No delegation balance");
+        require(userDelegationBalance[msg.sender].amount > 0, "No delegation balance");
         require(delegateArbBalance[delegate] > 0, "No delegation balance for delegate");
-        require(wrappedArbToken.balanceOf(address(this)) >= userDelegationBalance[msg.sender], "Insufficient wrapped ARB balance");
+        require(wrappedArbToken.balanceOf(address(this)) >= userDelegationBalance[msg.sender].amount, "Insufficient wrapped ARB balance");
 
-        uint256 amount = userDelegationBalance[msg.sender];
-        userDelegationBalance[msg.sender] = 0;
+        uint256 amount = userDelegationBalance[msg.sender].amount;
+        userDelegationBalance[msg.sender].amount = 0;
         delegateArbBalance[delegate] -= amount;
 
         bytes32 withdrawData = encoder.encodeWithdrawParams(address(arbToken), amount);
