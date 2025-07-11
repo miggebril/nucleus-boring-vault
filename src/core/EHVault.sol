@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import { BoringVault } from "src/base/BoringVault.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { ERC20Votes } from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
+import { ERC20Wrapper } from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Wrapper.sol";
 import { L2Pool } from "@aave/core-v3/contracts/protocol/pool/L2Pool.sol";
 import { IPoolAddressesProvider } from "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 import { L2Encoder } from "@aave/core-v3/contracts/misc/L2Encoder.sol";
@@ -20,8 +20,8 @@ contract EHVault is BoringVault {
     IPoolAddressesProvider public immutable ADDRESSES_PROVIDER;
     L2Pool public immutable lendingPool;
     L2Encoder public immutable encoder;
-    IERC20 public immutable wrappedArbToken;
-    ERC20Votes public immutable arbToken = ERC20Votes(0x912CE59144191C1204E64559FE8253a0e49E6548);
+    ERC20Wrapper public immutable wrappedArbToken;
+    IERC20 public immutable arbToken;
     address public immutable treasury;
     address[] public delegates;
     mapping(address => uint256) public delegateArbBalance;
@@ -46,7 +46,6 @@ contract EHVault is BoringVault {
         uint8 _decimals,
         address _lendingPool,
         address _arbToken,
-        address _wrappedArbToken,
         address _addressesProvider,
         address _treasury
     )
@@ -54,8 +53,8 @@ contract EHVault is BoringVault {
     {
         ADDRESSES_PROVIDER = IPoolAddressesProvider(_addressesProvider);
         lendingPool = L2Pool(_lendingPool);
-        arbToken = ERC20Votes(_arbToken);
-        wrappedArbToken = IERC20(_wrappedArbToken);
+        arbToken = IERC20(_arbToken);
+        wrappedArbToken = ERC20Wrapper(_arbToken);
         encoder = L2Encoder(address(lendingPool));
         treasury = _treasury;
     }
