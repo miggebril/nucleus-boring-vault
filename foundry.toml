@@ -2,7 +2,7 @@
 # Sets the concrete solc version to use
 # This overrides the `auto_detect_solc` value
 auto_detect_solc = false
-evm_version = 'shanghai'
+evm_version = 'cancun'
 optimizer = true
 optimizer_runs = 200
 fs_permissions = [{ access = "read-write", path = "./" }]

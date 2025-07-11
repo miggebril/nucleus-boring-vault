@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.21;
+pragma solidity ^0.8.24;
 
-import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { BoringVault } from "src/base/BoringVault.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20Votes } from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
-import { Auth, Authority } from "@solmate/auth/Auth.sol";
-import { L2Pool } from "@aave/core-v3/contracts/protocol/pool/Pool.sol";
+import { L2Pool } from "@aave/core-v3/contracts/protocol/pool/L2Pool.sol";
 import { IPoolAddressesProvider } from "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 import { L2Encoder } from "@aave/core-v3/contracts/misc/L2Encoder.sol";
 
 contract EHVault is BoringVault {
-
     struct Delegation {
         address delegatee;
         address delegator;
@@ -25,41 +22,22 @@ contract EHVault is BoringVault {
     L2Encoder public immutable encoder;
     IERC20 public immutable wrappedArbToken;
     ERC20Votes public immutable arbToken = ERC20Votes(0x912CE59144191C1204E64559FE8253a0e49E6548);
-    
     address public immutable treasury;
     address[] public delegates;
     mapping(address => uint256) public delegateArbBalance;
     mapping(address => Delegation[]) public delegatorsPerDelegate;
     mapping(address => Delegation) public userDelegationBalance;
 
-    event DelegationReceived(
-        address indexed from,
-        address indexed to,
-        uint256 amount
-    );
-    event DelegationWithdrawn(
-        address indexed from,
-        address indexed to,
-        uint256 amount
-    );
+    event DelegationReceived(address indexed from, address indexed to, uint256 amount);
+    event DelegationWithdrawn(address indexed from, address indexed to, uint256 amount);
 
-    event AssetsRecalled(
-        uint256 amount
-    );
+    event AssetsRecalled(uint256 amount);
 
-    event VotingWindowStarted(
-        uint256 startTime,
-        uint256 endTime
-    );
+    event VotingWindowStarted(uint256 startTime, uint256 endTime);
 
-    event VotingWindowEnded(
-        uint256 endTime
-    );
+    event VotingWindowEnded(uint256 endTime);
 
-    event AssetsDeployed(
-        address indexed asset,
-        uint256 amount
-    );
+    event AssetsDeployed(address indexed asset, uint256 amount);
 
     constructor(
         address _owner,
@@ -76,9 +54,9 @@ contract EHVault is BoringVault {
     {
         ADDRESSES_PROVIDER = IPoolAddressesProvider(_addressesProvider);
         lendingPool = L2Pool(_lendingPool);
-        arbToken = _arbToken;
+        arbToken = ERC20Votes(_arbToken);
         wrappedArbToken = IERC20(_wrappedArbToken);
-        encoder = L2Encoder(lendingPool);
+        encoder = L2Encoder(address(lendingPool));
         treasury = _treasury;
     }
 
@@ -96,7 +74,7 @@ contract EHVault is BoringVault {
 
     function removeDelegate(address delegate) external requiresAuth {
         require(delegate != address(0), "Invalid delegate address");
-        uint 256 delegateIndex = delegates.length;
+        uint256 delegateIndex = delegates.length;
         for (uint256 i = 0; i < delegates.length; i++) {
             address currentDelegate = delegates[i];
             if (currentDelegate == delegate) {
@@ -107,13 +85,18 @@ contract EHVault is BoringVault {
 
         require(delegateIndex < delegates.length, "Delegate not found");
         if (delegateArbBalance[delegate] > 0) {
-            // TODO: Handle assets for this delegate. Send back to user for now.
-
+            delegateArbBalance[treasury] += delegateArbBalance[delegate];
+            for (uint256 i = 0; i < delegates.length; i++) {
+                for (uint256 x = 0; x < delegatorsPerDelegate[delegates[i]].length; x++) {
+                    Delegation storage delegator = delegatorsPerDelegate[delegates[i]][x];
+                    delegator.delegatee = treasury;
+                }
+            }
         }
     }
 
     function enterStrategy(uint256 amount, address delegate) external {
-        require(arbToken.balanceOf() >= amount, "Insufficient ARB balance");
+        require(arbToken.balanceOf(msg.sender) >= amount, "Insufficient ARB balance");
         require(delegate != address(0), "Invalid delegate address");
         require(wrappedArbToken.balanceOf(address(this)) >= amount, "Insufficient wrapped ARB balance");
 
@@ -129,10 +112,11 @@ contract EHVault is BoringVault {
         delegateArbBalance[delegate] += amount;
         if (userDelegationBalance[msg.sender].amount == 0) {
             userDelegationBalance[msg.sender] = Delegation({
-                delegate: delegate,
+                delegatee: delegate,
                 delegator: msg.sender,
                 amount: 0,
                 startTime: block.timestamp,
+                endTime: 0
             });
         }
 
@@ -151,7 +135,10 @@ contract EHVault is BoringVault {
     function exit(address delegate) external {
         require(userDelegationBalance[msg.sender].amount > 0, "No delegation balance");
         require(delegateArbBalance[delegate] > 0, "No delegation balance for delegate");
-        require(wrappedArbToken.balanceOf(address(this)) >= userDelegationBalance[msg.sender].amount, "Insufficient wrapped ARB balance");
+        require(
+            wrappedArbToken.balanceOf(address(this)) >= userDelegationBalance[msg.sender].amount,
+            "Insufficient wrapped ARB balance"
+        );
 
         uint256 amount = userDelegationBalance[msg.sender].amount;
         userDelegationBalance[msg.sender].amount = 0;
@@ -167,8 +154,7 @@ contract EHVault is BoringVault {
     }
 
     function startVotingWindow() external requiresAuth {
-        (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currrentLiquidationThreshold, uint256 ltv, uint256 healthFactor) 
-            = lendingPool.getUserAccountData(address(this));
+        (uint256 totalCollateralBase,,,,,) = lendingPool.getUserAccountData(address(this));
         require(totalCollateralBase > 0, "No collateral available");
 
         bytes32 withdrawData = encoder.encodeWithdrawParams(address(arbToken), totalCollateralBase);
@@ -192,7 +178,7 @@ contract EHVault is BoringVault {
         // TODO
 
         // Redeploy assets to the lending pool
-        
+
         bytes32 supplyData = encoder.encodeSupplyParams(address(arbToken), wrappedArbToken.balanceOf(address(this)), 0);
         lendingPool.supply(supplyData);
 
